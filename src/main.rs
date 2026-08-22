@@ -441,10 +441,7 @@ fn ai_tick(bot: &Client, controller: &Controller) -> eyre::Result<()> {
         }
         if distance > controller.config.follow_distance + 0.75 && !bot.is_calculating_path() {
             bot.start_goto_with_opts(
-                RadiusGoal::new(
-                    target.position()?,
-                    controller.config.follow_distance as f32,
-                ),
+                RadiusGoal::new(target.position()?, controller.config.follow_distance as f32),
                 PathfinderOpts::new()
                     .retry_on_no_path(false)
                     .max_timeout(Duration::from_secs(2)),
