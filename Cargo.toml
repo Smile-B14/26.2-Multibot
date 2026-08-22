@@ -1,0 +1,26 @@
+[package]
+name = "multibot-26-2"
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+description = "Minecraft Java 26.2 multi-bot controller with per-bot SOCKS5 routing"
+
+[dependencies]
+azalea = { git = "https://github.com/azalea-rs/azalea", rev = "6249c295d353b9b3ef68f665b311cba39211fd19" }
+azalea-entity = { git = "https://github.com/azalea-rs/azalea", rev = "6249c295d353b9b3ef68f665b311cba39211fd19" }
+azalea-inventory = { git = "https://github.com/azalea-rs/azalea", rev = "6249c295d353b9b3ef68f665b311cba39211fd19" }
+azalea-protocol = { git = "https://github.com/azalea-rs/azalea", rev = "6249c295d353b9b3ef68f665b311cba39211fd19" }
+bevy_ecs = "0.19"
+eyre = "0.6"
+parking_lot = "0.12"
+rand = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "charset"] }
+tokio = { version = "1.52", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
