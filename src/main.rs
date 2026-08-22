@@ -101,6 +101,7 @@ impl Default for Controller {
 
 impl Controller {
     fn new(config: Config) -> Self {
+        let infinite_initial = config.infinite_initial;
         let known = config
             .bot_names
             .iter()
@@ -119,7 +120,7 @@ impl Controller {
             auth_enabled: Arc::new(AtomicBool::new(true)),
             auth_password: Arc::new(RwLock::new(DEFAULT_AUTH_PASSWORD.into())),
             joining_enabled: Arc::new(AtomicBool::new(true)),
-            infinite_spawn: Arc::new(AtomicBool::new(config.infinite_initial)),
+            infinite_spawn: Arc::new(AtomicBool::new(infinite_initial)),
             spam_generation: Arc::new(AtomicU64::new(0)),
             shutting_down: Arc::new(AtomicBool::new(false)),
             dead_bots: Arc::new(AtomicUsize::new(0)),
@@ -427,7 +428,7 @@ fn ai_tick(bot: &Client, controller: &Controller) -> eyre::Result<()> {
     let eye = bot.eye_position()?;
     let target = bot
         .nearest_entity_by::<&Position, (With<Player>, Without<LocalEntity>, Without<Dead>)>(
-            |position: &Position| eye.distance_to(*position) <= controller.config.follow_radius,
+            |position: &Position| eye.distance_to(**position) <= controller.config.follow_radius,
         )?;
 
     if let Some(target) = target {
