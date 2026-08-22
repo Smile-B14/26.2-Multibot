@@ -759,7 +759,9 @@ async fn command_loop(swarm: Swarm, controller: Controller) {
                 return;
             }
             Err(error) => {
-                eprintln!("Terminal input error: {error}. Commands remain disabled; stopping safely.");
+                eprintln!(
+                    "Terminal input error: {error}. Commands remain disabled; stopping safely."
+                );
                 controller.shutting_down.store(true, Ordering::Relaxed);
                 swarm.exit();
                 return;
@@ -796,9 +798,7 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
                 }
                 println!("Queued {count} bots.");
             }
-            Ok(_) => println!(
-                "For stability, add at most {MAX_ADD_PER_COMMAND} bots per command."
-            ),
+            Ok(_) => println!("For stability, add at most {MAX_ADD_PER_COMMAND} bots per command."),
             Err(_) => println!("Use: add <number> (0 = infinite)"),
         },
         "list" => {
@@ -821,7 +821,9 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
                         start_spam(c.clone(), ms, msg.to_owned());
                     }
                     _ => {
-                        println!("Interval must be a number >= 1000ms and message cannot be blank.");
+                        println!(
+                            "Interval must be a number >= 1000ms and message cannot be blank."
+                        );
                     }
                 }
             } else {
@@ -1060,12 +1062,9 @@ mod tests {
     }
     #[test]
     fn proxy_parser_ignores_invalid_and_duplicate_lines() {
-        let proxies = parse_proxies(
-            "127.0.0.1:1080\ninvalid\n127.0.0.1:1080\n[::1]:1081\n",
-        );
+        let proxies = parse_proxies("127.0.0.1:1080\ninvalid\n127.0.0.1:1080\n[::1]:1081\n");
         assert_eq!(proxies.len(), 2);
         assert_eq!(proxies[0].addr, "127.0.0.1:1080".parse().unwrap());
         assert_eq!(proxies[1].addr, "[::1]:1081".parse().unwrap());
     }
-
 }
