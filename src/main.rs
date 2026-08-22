@@ -253,13 +253,12 @@ async fn resolve_server(raw: &str) -> eyre::Result<ResolvedAddr> {
     let mut target = server.clone();
     if server.port == 25565 {
         let query = format!("_minecraft._tcp.{}", server.host);
-        if let Ok(records) = resolver.srv_lookup(query).await {
-            if let Some(answer) = records.answers().first() {
-                if let RData::SRV(srv) = &answer.data {
-                    target.host = srv.target.to_ascii();
-                    target.port = srv.port;
-                }
-            }
+        if let Ok(records) = resolver.srv_lookup(query).await
+            && let Some(answer) = records.answers().first()
+            && let RData::SRV(srv) = &answer.data
+        {
+            target.host = srv.target.to_ascii();
+            target.port = srv.port;
         }
     }
 
@@ -465,10 +464,10 @@ async fn bot_handler(bot: Client, event: Event, state: BotState) -> eyre::Result
             handle_auth(&bot, &state, &controller, &text);
         }
         Event::Tick => {
-            if let Err(error) = ai_tick(&bot, &controller) {
-                if controller.logs_enabled.load(Ordering::Relaxed) {
-                    eprintln!("[{}] AI tick skipped: {error}", state.name);
-                }
+            if let Err(error) = ai_tick(&bot, &controller)
+                && controller.logs_enabled.load(Ordering::Relaxed)
+            {
+                eprintln!("[{}] AI tick skipped: {error}", state.name);
             }
         }
         Event::Disconnect(reason) => {
@@ -586,12 +585,12 @@ fn ai_tick(bot: &Client, controller: &Controller) -> eyre::Result<()> {
 }
 
 fn drop_inventory(bot: &Client) {
-    if let Ok(Some(inventory)) = bot.open_inventory() {
-        if let Some(menu) = inventory.menu().ok().flatten() {
-            for slot in menu.player_slots_range() {
-                if menu.slot(slot).is_some_and(|item| item.is_present()) {
-                    inventory.click(ThrowClick::All { slot: slot as u16 });
-                }
+    if let Ok(Some(inventory)) = bot.open_inventory()
+        && let Some(menu) = inventory.menu().ok().flatten()
+    {
+        for slot in menu.player_slots_range() {
+            if menu.slot(slot).is_some_and(|item| item.is_present()) {
+                inventory.click(ThrowClick::All { slot: slot as u16 });
             }
         }
     }
@@ -645,10 +644,8 @@ async fn swarm_handler(
                 enqueue_unique(&controller, name, false);
             }
         }
-        SwarmEvent::Chat(message) => {
-            if controller.logs_enabled.load(Ordering::Relaxed) {
-                println!("{}", message.message().to_ansi());
-            }
+        SwarmEvent::Chat(message) if controller.logs_enabled.load(Ordering::Relaxed) => {
+            println!("{}", message.message().to_ansi());
         }
         _ => {}
     }
