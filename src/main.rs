@@ -420,14 +420,16 @@ async fn fetch_proxies() -> eyre::Result<Vec<Proxy>> {
         return Err(eyre::eyre!("proxy response is larger than 2 MiB"));
     }
     let body = String::from_utf8_lossy(&bytes);
+    Ok(parse_proxies(&body))
+}
+
+fn parse_proxies(body: &str) -> Vec<Proxy> {
     let mut seen = HashSet::new();
-    let proxies = body
-        .lines()
+    body.lines()
         .filter_map(|line| SocketAddr::from_str(line.trim()).ok())
         .filter(|addr| seen.insert(*addr))
         .map(|addr| Proxy::new(addr, None))
-        .collect();
-    Ok(proxies)
+        .collect()
 }
 
 fn join_opts(proxy: Option<Proxy>) -> JoinOpts {
@@ -1056,4 +1058,14 @@ mod tests {
         assert!(!valid_name("has space"));
         assert!(!valid_name("way_too_long_username"));
     }
+    #[test]
+    fn proxy_parser_ignores_invalid_and_duplicate_lines() {
+        let proxies = parse_proxies(
+            "127.0.0.1:1080\ninvalid\n127.0.0.1:1080\n[::1]:1081\n",
+        );
+        assert_eq!(proxies.len(), 2);
+        assert_eq!(proxies[0].addr, "127.0.0.1:1080".parse().unwrap());
+        assert_eq!(proxies[1].addr, "[::1]:1081".parse().unwrap());
+    }
+
 }
