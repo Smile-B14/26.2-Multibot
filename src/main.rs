@@ -304,7 +304,10 @@ fn interactive_setup() -> Config {
     names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
 
     let count = ask_until("How many bots initially? (0 = infinite): ", |v| {
-        v.trim().parse::<usize>().ok()
+        v.trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|count| *count == 0 || *count <= MAX_ADD_PER_COMMAND)
     });
     if names.is_empty() && count > 0 {
         names = (0..count).map(|_| generate_name()).collect();
@@ -811,11 +814,12 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
         }
         "spam" => {
             if let Some((ms, msg)) = rest.split_once(' ') {
-                if let Ok(ms) = ms.parse::<u64>() {
-                    if ms >= 1000 && !msg.is_empty() {
+                match ms.parse::<u64>() {
+                    Ok(ms) if ms >= 1000 && !msg.is_empty() => {
                         start_spam(c.clone(), ms, msg.to_owned());
-                    } else {
-                        println!("Interval must be >= 1000ms and message cannot be blank.");
+                    }
+                    _ => {
+                        println!("Interval must be a number >= 1000ms and message cannot be blank.");
                     }
                 }
             } else {
