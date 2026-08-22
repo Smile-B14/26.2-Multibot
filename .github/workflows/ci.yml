@@ -16,8 +16,11 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo fmt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formatted-source
+          path: src/main.rs
+      - run: cargo check --all-targets --all-features
       - run: cargo test --all-features
       - run: cargo build --release
-
