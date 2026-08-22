@@ -39,6 +39,10 @@ use tokio::{
 const BANNER: &str = "Minecraft 26.2 MultiBot Pro v1.0";
 const PROXY_SOURCE: &str = "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks5&timeout=10000&country=all&ssl=all&anonymity=all";
 const DEFAULT_AUTH_PASSWORD: &str = "thematic";
+const PROXY_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const MAX_PROXY_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
+const DEAD_PROXY_TTL: Duration = Duration::from_secs(10 * 60);
+const MAX_ADD_PER_COMMAND: usize = 10_000;
 
 #[derive(Clone, Debug)]
 struct Config {
@@ -140,7 +144,7 @@ impl Controller {
 #[derive(Default)]
 struct ProxyPool {
     available: RwLock<Vec<Proxy>>,
-    dead: Mutex<HashSet<SocketAddr>>,
+    dead: Mutex<HashMap<SocketAddr, Instant>>,
     cursor: AtomicUsize,
 }
 
@@ -155,9 +159,12 @@ impl ProxyPool {
         if proxies.is_empty() {
             return None;
         }
+        let now = Instant::now();
+        let mut dead = self.dead.lock();
+        dead.retain(|_, failed_at| now.duration_since(*failed_at) < DEAD_PROXY_TTL);
         for _ in 0..proxies.len() {
             let i = self.cursor.fetch_add(1, Ordering::Relaxed) % proxies.len();
-            if !self.dead.lock().contains(&proxies[i].addr) {
+            if !dead.contains_key(&proxies[i].addr) {
                 return Some(proxies[i].clone());
             }
         }
@@ -165,7 +172,7 @@ impl ProxyPool {
     }
 
     fn mark_dead(&self, proxy: &Proxy) {
-        self.dead.lock().insert(proxy.addr);
+        self.dead.lock().insert(proxy.addr, Instant::now());
     }
 
     fn counts(&self) -> (usize, usize) {
@@ -200,9 +207,14 @@ async fn main() -> eyre::Result<AppExit> {
             println!("\x1b[32mLoaded {} SOCKS5 proxies.\x1b[0m", proxies.len());
             controller.proxies.replace(proxies);
         }
-        Ok(_) | Err(_) => {
+        Ok(_) => {
             println!(
-                "\x1b[33mNo proxies loaded. Bots will use the direct connection until refresh succeeds.\x1b[0m"
+                "\x1b[33mNo valid proxies loaded. Bots will use the direct connection until refresh succeeds.\x1b[0m"
+            );
+        }
+        Err(error) => {
+            println!(
+                "\x1b[33mProxy fetch failed: {error}. Bots will use the direct connection and retry in 60 seconds.\x1b[0m"
             );
         }
     }
@@ -241,13 +253,12 @@ async fn resolve_server(raw: &str) -> eyre::Result<ResolvedAddr> {
     let mut target = server.clone();
     if server.port == 25565 {
         let query = format!("_minecraft._tcp.{}", server.host);
-        if let Ok(records) = resolver.srv_lookup(query).await {
-            if let Some(answer) = records.answers().first() {
-                if let RData::SRV(srv) = &answer.data {
-                    target.host = srv.target.to_ascii();
-                    target.port = srv.port;
-                }
-            }
+        if let Ok(records) = resolver.srv_lookup(query).await
+            && let Some(answer) = records.answers().first()
+            && let RData::SRV(srv) = &answer.data
+        {
+            target.host = srv.target.to_ascii();
+            target.port = srv.port;
         }
     }
 
@@ -292,7 +303,10 @@ fn interactive_setup() -> Config {
     names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
 
     let count = ask_until("How many bots initially? (0 = infinite): ", |v| {
-        v.trim().parse::<usize>().ok()
+        v.trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|count| *count == 0 || *count <= MAX_ADD_PER_COMMAND)
     });
     if names.is_empty() && count > 0 {
         names = (0..count).map(|_| generate_name()).collect();
@@ -339,12 +353,21 @@ fn ask_server() -> String {
 
 fn ask(prompt: &str) -> String {
     print!("{prompt}");
-    let _ = io::stdout().flush();
+    if let Err(error) = io::stdout().flush() {
+        eprintln!("Could not flush terminal output: {error}");
+    }
     let mut value = String::new();
-    io::stdin()
-        .read_line(&mut value)
-        .expect("stdin unavailable");
-    value.trim().to_owned()
+    match io::stdin().read_line(&mut value) {
+        Ok(0) => {
+            println!("Input closed. Exiting cleanly.");
+            std::process::exit(0);
+        }
+        Ok(_) => value.trim().to_owned(),
+        Err(error) => {
+            eprintln!("Could not read terminal input: {error}. Exiting cleanly.");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn ask_until<T>(prompt: &str, parse: impl Fn(&str) -> Option<T>) -> T {
@@ -380,15 +403,32 @@ fn generate_name() -> String {
 }
 
 async fn fetch_proxies() -> eyre::Result<Vec<Proxy>> {
-    let body = reqwest::get(PROXY_SOURCE).await?.text().await?;
+    let client = reqwest::Client::builder()
+        .timeout(PROXY_REQUEST_TIMEOUT)
+        .user_agent("Minecraft-26.2-MultiBot-Pro/1.0")
+        .build()?;
+    let response = client.get(PROXY_SOURCE).send().await?.error_for_status()?;
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_PROXY_RESPONSE_BYTES)
+    {
+        return Err(eyre::eyre!("proxy response is larger than 2 MiB"));
+    }
+    let bytes = response.bytes().await?;
+    if bytes.len() as u64 > MAX_PROXY_RESPONSE_BYTES {
+        return Err(eyre::eyre!("proxy response is larger than 2 MiB"));
+    }
+    let body = String::from_utf8_lossy(&bytes);
+    Ok(parse_proxies(&body))
+}
+
+fn parse_proxies(body: &str) -> Vec<Proxy> {
     let mut seen = HashSet::new();
-    let proxies = body
-        .lines()
+    body.lines()
         .filter_map(|line| SocketAddr::from_str(line.trim()).ok())
         .filter(|addr| seen.insert(*addr))
         .map(|addr| Proxy::new(addr, None))
-        .collect();
-    Ok(proxies)
+        .collect()
 }
 
 fn join_opts(proxy: Option<Proxy>) -> JoinOpts {
@@ -424,7 +464,11 @@ async fn bot_handler(bot: Client, event: Event, state: BotState) -> eyre::Result
             handle_auth(&bot, &state, &controller, &text);
         }
         Event::Tick => {
-            ai_tick(&bot, &controller)?;
+            if let Err(error) = ai_tick(&bot, &controller)
+                && controller.logs_enabled.load(Ordering::Relaxed)
+            {
+                eprintln!("[{}] AI tick skipped: {error}", state.name);
+            }
         }
         Event::Disconnect(reason) => {
             controller
@@ -541,12 +585,12 @@ fn ai_tick(bot: &Client, controller: &Controller) -> eyre::Result<()> {
 }
 
 fn drop_inventory(bot: &Client) {
-    if let Ok(Some(inventory)) = bot.open_inventory() {
-        if let Some(menu) = inventory.menu().ok().flatten() {
-            for slot in menu.player_slots_range() {
-                if menu.slot(slot).is_some_and(|item| item.is_present()) {
-                    inventory.click(ThrowClick::All { slot: slot as u16 });
-                }
+    if let Ok(Some(inventory)) = bot.open_inventory()
+        && let Some(menu) = inventory.menu().ok().flatten()
+    {
+        for slot in menu.player_slots_range() {
+            if menu.slot(slot).is_some_and(|item| item.is_present()) {
+                inventory.click(ThrowClick::All { slot: slot as u16 });
             }
         }
     }
@@ -581,7 +625,7 @@ async fn swarm_handler(
                 let exit_swarm = swarm.clone();
                 let minutes = controller.config.stay_minutes;
                 tokio::task::spawn_local(async move {
-                    sleep(Duration::from_secs(minutes * 60)).await;
+                    sleep(Duration::from_secs(minutes.saturating_mul(60))).await;
                     println!("Stay timer finished. Disconnecting all bots.");
                     exit_swarm.exit();
                 });
@@ -600,10 +644,8 @@ async fn swarm_handler(
                 enqueue_unique(&controller, name, false);
             }
         }
-        SwarmEvent::Chat(message) => {
-            if controller.logs_enabled.load(Ordering::Relaxed) {
-                println!("{}", message.message().to_ansi());
-            }
+        SwarmEvent::Chat(message) if controller.logs_enabled.load(Ordering::Relaxed) => {
+            println!("{}", message.message().to_ansi());
         }
         _ => {}
     }
@@ -616,13 +658,23 @@ async fn proxy_refresh_loop(controller: Controller) {
         if controller.shutting_down.load(Ordering::Relaxed) {
             return;
         }
-        if let Ok(proxies) = fetch_proxies().await {
-            if !proxies.is_empty() {
+        match fetch_proxies().await {
+            Ok(proxies) if !proxies.is_empty() => {
                 let old = controller.proxies.available.read().len();
                 controller.proxies.replace(proxies);
                 let new = controller.proxies.available.read().len();
                 if new != old {
                     println!("\x1b[36mProxy refresh: {new} available.\x1b[0m");
+                }
+            }
+            Ok(_) => {
+                if controller.logs_enabled.load(Ordering::Relaxed) {
+                    eprintln!("Proxy refresh returned no valid SOCKS5 addresses.");
+                }
+            }
+            Err(error) => {
+                if controller.logs_enabled.load(Ordering::Relaxed) {
+                    eprintln!("Proxy refresh failed: {error}");
                 }
             }
         }
@@ -637,6 +689,7 @@ async fn queue_loop(swarm: Swarm, controller: Controller) {
         }
         if controller.infinite_spawn.load(Ordering::Relaxed)
             && controller.joining_enabled.load(Ordering::Relaxed)
+            && controller.queued_names.lock().is_empty()
         {
             let name = unique_name(&controller);
             controller.queued_names.lock().push_back((name, false));
@@ -688,13 +741,28 @@ fn proxy_label(proxy: &Option<Proxy>) -> String {
 async fn command_loop(swarm: Swarm, controller: Controller) {
     print_help();
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        if handle_command(&swarm, &controller, line).await {
-            return;
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => {
+                let line = line.trim();
+                if !line.is_empty() && handle_command(&swarm, &controller, line).await {
+                    return;
+                }
+            }
+            Ok(None) => {
+                println!("Terminal input closed. Disconnecting bots cleanly.");
+                controller.shutting_down.store(true, Ordering::Relaxed);
+                swarm.exit();
+                return;
+            }
+            Err(error) => {
+                eprintln!(
+                    "Terminal input error: {error}. Commands remain disabled; stopping safely."
+                );
+                controller.shutting_down.store(true, Ordering::Relaxed);
+                swarm.exit();
+                return;
+            }
         }
     }
 }
@@ -720,13 +788,14 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
                 c.joining_enabled.store(true, Ordering::Relaxed);
                 println!("Infinite spawning enabled.");
             }
-            Ok(count) => {
+            Ok(count) if count <= MAX_ADD_PER_COMMAND => {
                 c.maintain_target.fetch_add(count, Ordering::Relaxed);
                 for _ in 0..count {
-                    c.queued_names.lock().push_back((unique_name(c), false));
+                    enqueue_unique(c, unique_name(c), false);
                 }
                 println!("Queued {count} bots.");
             }
+            Ok(_) => println!("For stability, add at most {MAX_ADD_PER_COMMAND} bots per command."),
             Err(_) => println!("Use: add <number> (0 = infinite)"),
         },
         "list" => {
@@ -744,11 +813,14 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
         }
         "spam" => {
             if let Some((ms, msg)) = rest.split_once(' ') {
-                if let Ok(ms) = ms.parse::<u64>() {
-                    if ms >= 1000 && !msg.is_empty() {
+                match ms.parse::<u64>() {
+                    Ok(ms) if ms >= 1000 && !msg.is_empty() => {
                         start_spam(c.clone(), ms, msg.to_owned());
-                    } else {
-                        println!("Interval must be >= 1000ms and message cannot be blank.");
+                    }
+                    _ => {
+                        println!(
+                            "Interval must be a number >= 1000ms and message cannot be blank."
+                        );
                     }
                 }
             } else {
@@ -984,5 +1056,12 @@ mod tests {
         assert!(!valid_name("a"));
         assert!(!valid_name("has space"));
         assert!(!valid_name("way_too_long_username"));
+    }
+    #[test]
+    fn proxy_parser_ignores_invalid_and_duplicate_lines() {
+        let proxies = parse_proxies("127.0.0.1:1080\ninvalid\n127.0.0.1:1080\n[::1]:1081\n");
+        assert_eq!(proxies.len(), 2);
+        assert_eq!(proxies[0].addr, "127.0.0.1:1080".parse().unwrap());
+        assert_eq!(proxies[1].addr, "[::1]:1081".parse().unwrap());
     }
 }
