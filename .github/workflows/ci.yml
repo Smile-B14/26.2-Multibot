@@ -20,3 +20,15 @@ jobs:
       - run: cargo check --all-targets --all-features
       - run: cargo test --all-features
       - run: cargo build --release
+
+  termux-compiler-check:
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_BOOTSTRAP: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: termux-stable
+      - run: cargo +stable check --all-targets --all-features
