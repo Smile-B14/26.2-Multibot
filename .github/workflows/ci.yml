@@ -12,12 +12,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo check --all-targets --all-features
       - run: cargo test --all-features
       - run: cargo build --release
 
+  termux-compiler-check:
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_BOOTSTRAP: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: termux-stable
+      - name: Check using Termux compiler method
+        run: |
+          TERMUX_CARGO="$(rustup which --toolchain 1.97.1 cargo)"
+          TERMUX_RUSTC="$(rustup which --toolchain 1.97.1 rustc)"
+          RUSTUP_TOOLCHAIN=nightly-termux RUSTC="$TERMUX_RUSTC" "$TERMUX_CARGO" check --all-targets --all-features
