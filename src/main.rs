@@ -165,8 +165,7 @@ impl ProxyPool {
 async fn main() -> AppExit {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "warn".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
         )
         .init();
 
@@ -183,7 +182,9 @@ async fn main() -> AppExit {
             controller.proxies.replace(proxies);
         }
         Ok(_) | Err(_) => {
-            println!("\x1b[33mNo proxies loaded. Bots will use the direct connection until refresh succeeds.\x1b[0m");
+            println!(
+                "\x1b[33mNo proxies loaded. Bots will use the direct connection until refresh succeeds.\x1b[0m"
+            );
         }
     }
 
@@ -211,7 +212,11 @@ async fn main() -> AppExit {
 
 fn interactive_setup() -> Config {
     let server = ask_until("Server IP / hostname (include :port if needed): ", |v| {
-        if v.trim().is_empty() { None } else { Some(v.trim().to_owned()) }
+        if v.trim().is_empty() {
+            None
+        } else {
+            Some(v.trim().to_owned())
+        }
     });
 
     let names_text = ask("Bot names separated by commas (blank = generated): ");
@@ -259,7 +264,9 @@ fn ask(prompt: &str) -> String {
     print!("{prompt}");
     let _ = io::stdout().flush();
     let mut value = String::new();
-    io::stdin().read_line(&mut value).expect("stdin unavailable");
+    io::stdin()
+        .read_line(&mut value)
+        .expect("stdin unavailable");
     value.trim().to_owned()
 }
 
@@ -274,14 +281,13 @@ fn ask_until<T>(prompt: &str, parse: impl Fn(&str) -> Option<T>) -> T {
 }
 
 fn valid_name(name: &str) -> bool {
-    (3..=16).contains(&name.len())
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    (3..=16).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn generate_name() -> String {
     const WORDS: &[&str] = &[
-        "Pixel", "Shadow", "Craft", "Steve", "Alex", "Boss", "Sniper", "Nova",
-        "Ghost", "Block", "Ninja", "Gamer", "Creeper", "Turbo", "Dark", "Wolf",
+        "Pixel", "Shadow", "Craft", "Steve", "Alex", "Boss", "Sniper", "Nova", "Ghost", "Block",
+        "Ninja", "Gamer", "Creeper", "Turbo", "Dark", "Wolf",
     ];
     let mut rng = rand::rng();
     let word = WORDS.choose(&mut rng).copied().unwrap_or("Bot");
@@ -324,7 +330,11 @@ async fn bot_handler(bot: Client, event: Event, state: BotState) -> eyre::Result
                 .write()
                 .insert(state.name.to_ascii_lowercase(), bot.clone());
             *state.auth_deadline.lock() = Some(Instant::now() + Duration::from_secs(30));
-            println!("\x1b[32m[{}] JOINED through {}\x1b[0m", state.name, proxy_label(&state.proxy));
+            println!(
+                "\x1b[32m[{}] JOINED through {}\x1b[0m",
+                state.name,
+                proxy_label(&state.proxy)
+            );
             if state.stolen {
                 drop_inventory(&bot);
             }
@@ -340,12 +350,21 @@ async fn bot_handler(bot: Client, event: Event, state: BotState) -> eyre::Result
             ai_tick(&bot, &controller)?;
         }
         Event::Disconnect(reason) => {
-            controller.clients.write().remove(&state.name.to_ascii_lowercase());
+            controller
+                .clients
+                .write()
+                .remove(&state.name.to_ascii_lowercase());
             println!("\x1b[31m[{}] DISCONNECTED: {reason:?}\x1b[0m", state.name);
         }
         Event::ConnectionFailed(reason) => {
-            controller.clients.write().remove(&state.name.to_ascii_lowercase());
-            println!("\x1b[31m[{}] CONNECTION FAILED: {reason:?}\x1b[0m", state.name);
+            controller
+                .clients
+                .write()
+                .remove(&state.name.to_ascii_lowercase());
+            println!(
+                "\x1b[31m[{}] CONNECTION FAILED: {reason:?}\x1b[0m",
+                state.name
+            );
         }
         _ => {}
     }
@@ -354,7 +373,10 @@ async fn bot_handler(bot: Client, event: Event, state: BotState) -> eyre::Result
 
 fn handle_auth(bot: &Client, state: &BotState, controller: &Controller, raw: &str) {
     if !controller.auth_enabled.load(Ordering::Relaxed)
-        || state.auth_deadline.lock().is_none_or(|end| Instant::now() > end)
+        || state
+            .auth_deadline
+            .lock()
+            .is_none_or(|end| Instant::now() > end)
     {
         return;
     }
@@ -363,16 +385,20 @@ fn handle_auth(bot: &Client, state: &BotState, controller: &Controller, raw: &st
     }
     let text = raw.to_ascii_lowercase();
     let password = controller.auth_password.read().clone();
-    let command = if text.contains("register") || text.contains("registration") || text.contains("/reg") {
-        Some(format!("/register {password} {password}"))
-    } else if text.contains("login") || text.contains("log in") || text.contains("/login") {
-        Some(format!("/login {password}"))
-    } else {
-        None
-    };
+    let command =
+        if text.contains("register") || text.contains("registration") || text.contains("/reg") {
+            Some(format!("/register {password} {password}"))
+        } else if text.contains("login") || text.contains("log in") || text.contains("/login") {
+            Some(format!("/login {password}"))
+        } else {
+            None
+        };
     if let Some(command) = command {
         let mut last = state.last_auth.lock();
-        if last.as_ref().is_some_and(|(old, when)| old == &command && when.elapsed() < Duration::from_secs(3)) {
+        if last
+            .as_ref()
+            .is_some_and(|(old, when)| old == &command && when.elapsed() < Duration::from_secs(3))
+        {
             return;
         }
         bot.chat(&command);
@@ -389,11 +415,10 @@ fn ai_tick(bot: &Client, controller: &Controller) -> eyre::Result<()> {
         return Ok(());
     }
     let eye = bot.eye_position()?;
-    let target = bot.nearest_entity_by::<&Position, (
-        With<Player>,
-        Without<LocalEntity>,
-        Without<Dead>,
-    )>(|position| eye.distance_to(**position) <= controller.config.follow_radius)?;
+    let target = bot
+        .nearest_entity_by::<&Position, (With<Player>, Without<LocalEntity>, Without<Dead>)>(
+            |position| eye.distance_to(**position) <= controller.config.follow_radius,
+        )?;
 
     if let Some(target) = target {
         let distance = eye.distance_to(target.position()?);
@@ -415,11 +440,12 @@ fn ai_tick(bot: &Client, controller: &Controller) -> eyre::Result<()> {
     } else if tick.is_multiple_of(100) && !bot.is_calculating_path() && !bot.is_executing_path() {
         let position = bot.position()?;
         let mut rng = rand::rng();
-        let destination = position + azalea::Vec3::new(
-            rng.random_range(-10.0..10.0),
-            0.0,
-            rng.random_range(-10.0..10.0),
-        );
+        let destination = position
+            + azalea::Vec3::new(
+                rng.random_range(-10.0..10.0),
+                0.0,
+                rng.random_range(-10.0..10.0),
+            );
         bot.start_goto_with_opts(
             RadiusGoal::new(destination, 2.0),
             PathfinderOpts::new()
@@ -442,7 +468,11 @@ fn drop_inventory(bot: &Client) {
     }
 }
 
-async fn swarm_handler(swarm: Swarm, event: SwarmEvent, controller: Controller) -> eyre::Result<()> {
+async fn swarm_handler(
+    swarm: Swarm,
+    event: SwarmEvent,
+    controller: Controller,
+) -> eyre::Result<()> {
     match event {
         SwarmEvent::Init => {
             println!("\x1b[32mController ready. Type 'help' for commands.\x1b[0m");
@@ -540,7 +570,10 @@ async fn queue_loop(swarm: Swarm, controller: Controller) {
             stolen,
             ..Default::default()
         };
-        println!("\x1b[36m[{name}] Connecting through {}...\x1b[0m", proxy_label(&proxy));
+        println!(
+            "\x1b[36m[{name}] Connecting through {}...\x1b[0m",
+            proxy_label(&proxy)
+        );
         swarm
             .add_with_opts(&Account::offline(&name), state, &join_opts(proxy))
             .await;
@@ -551,7 +584,11 @@ async fn queue_loop(swarm: Swarm, controller: Controller) {
 fn unique_name(controller: &Controller) -> String {
     loop {
         let name = generate_name();
-        if controller.known_names.lock().insert(name.to_ascii_lowercase()) {
+        if controller
+            .known_names
+            .lock()
+            .insert(name.to_ascii_lowercase())
+        {
             return name;
         }
     }
@@ -569,8 +606,12 @@ async fn command_loop(swarm: Swarm, controller: Controller) {
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         let line = line.trim();
-        if line.is_empty() { continue; }
-        if handle_command(&swarm, &controller, line).await { return; }
+        if line.is_empty() {
+            continue;
+        }
+        if handle_command(&swarm, &controller, line).await {
+            return;
+        }
     }
 }
 
@@ -582,8 +623,12 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
             if let Some((name, msg)) = rest.split_once(' ') {
                 if let Some(bot) = c.clients.read().get(&name.to_ascii_lowercase()).cloned() {
                     bot.chat(msg);
-                } else { println!("Bot '{name}' is not online."); }
-            } else { println!("Use: one <name> <message>"); }
+                } else {
+                    println!("Bot '{name}' is not online.");
+                }
+            } else {
+                println!("Use: one <name> <message>");
+            }
         }
         "add" => match rest.parse::<usize>() {
             Ok(0) => {
@@ -604,8 +649,13 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
             let (total, dead) = c.proxies.counts();
             println!(
                 "Known: {} | Online: {} | Queued: {} | Proxies: {} | Dead proxies: {} | Target: {} | Infinite: {}",
-                c.known_names.lock().len(), c.clients.read().len(), c.queued_names.lock().len(),
-                total, dead, c.maintain_target.load(Ordering::Relaxed), c.infinite_spawn.load(Ordering::Relaxed)
+                c.known_names.lock().len(),
+                c.clients.read().len(),
+                c.queued_names.lock().len(),
+                total,
+                dead,
+                c.maintain_target.load(Ordering::Relaxed),
+                c.infinite_spawn.load(Ordering::Relaxed)
             );
         }
         "spam" => {
@@ -613,9 +663,13 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
                 if let Ok(ms) = ms.parse::<u64>() {
                     if ms >= 1000 && !msg.is_empty() {
                         start_spam(c.clone(), ms, msg.to_owned());
-                    } else { println!("Interval must be >= 1000ms and message cannot be blank."); }
+                    } else {
+                        println!("Interval must be >= 1000ms and message cannot be blank.");
+                    }
                 }
-            } else { println!("Use: spam <interval_ms> <message>"); }
+            } else {
+                println!("Use: spam <interval_ms> <message>");
+            }
         }
         "stopspam" => {
             c.spam_generation.fetch_add(1, Ordering::Relaxed);
@@ -642,8 +696,12 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
         "logs" => toggle(&c.logs_enabled, rest, "Logs"),
         "auth" => toggle(&c.auth_enabled, rest, "Auto-auth"),
         "authpass" => {
-            if rest.is_empty() { println!("Use: authpass <password>"); }
-            else { *c.auth_password.write() = rest.to_owned(); println!("Auth password updated for this run."); }
+            if rest.is_empty() {
+                println!("Use: authpass <password>");
+            } else {
+                *c.auth_password.write() = rest.to_owned();
+                println!("Auth password updated for this run.");
+            }
         }
         "resetban" | "resetall" => {
             c.proxies.dead.lock().clear();
@@ -651,18 +709,23 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
             println!("Local stopped/dead-proxy state cleared. This does not bypass server bans.");
         }
         "resetplayer" => {
-            if rest.is_empty() { println!("Use: resetplayer <name>"); }
-            else {
+            if rest.is_empty() {
+                println!("Use: resetplayer <name>");
+            } else {
                 c.known_names.lock().remove(&rest.to_ascii_lowercase());
                 println!("Local state cleared for {rest}.");
             }
         }
-        "version" => println!("Native protocol: Minecraft Java 26.2 (Azalea 0.16). Runtime switching is not needed."),
+        "version" => println!(
+            "Native protocol: Minecraft Java 26.2 (Azalea 0.16). Runtime switching is not needed."
+        ),
         "help" => print_help(),
         "quit" => {
             c.shutting_down.store(true, Ordering::Relaxed);
             c.spam_generation.fetch_add(1, Ordering::Relaxed);
-            for bot in c.clients.read().values() { bot.disconnect(); }
+            for bot in c.clients.read().values() {
+                bot.disconnect();
+            }
             swarm.exit();
             return true;
         }
@@ -672,7 +735,10 @@ async fn handle_command(swarm: &Swarm, c: &Controller, input: &str) -> bool {
 }
 
 async fn send_all(controller: &Controller, message: &str) {
-    if message.is_empty() { println!("Use: all <message>"); return; }
+    if message.is_empty() {
+        println!("Use: all <message>");
+        return;
+    }
     let bots: Vec<Client> = controller.clients.read().values().cloned().collect();
     for bot in &bots {
         bot.chat(message);
@@ -686,7 +752,9 @@ fn start_spam(controller: Controller, interval_ms: u64, message: String) {
     println!("Spam started every {interval_ms}ms.");
     tokio::task::spawn_local(async move {
         loop {
-            if controller.spam_generation.load(Ordering::Relaxed) != generation { return; }
+            if controller.spam_generation.load(Ordering::Relaxed) != generation {
+                return;
+            }
             send_all(&controller, &message).await;
             sleep(Duration::from_millis(interval_ms)).await;
         }
@@ -695,15 +763,30 @@ fn start_spam(controller: Controller, interval_ms: u64, message: String) {
 
 fn rejoin(controller: &Controller, target: &str) {
     if target.eq_ignore_ascii_case("all") {
-        let clients: Vec<(String, Client)> = controller.clients.read().iter().map(|(n, b)| (n.clone(), b.clone())).collect();
+        let clients: Vec<(String, Client)> = controller
+            .clients
+            .read()
+            .iter()
+            .map(|(n, b)| (n.clone(), b.clone()))
+            .collect();
         for (name, bot) in clients {
             bot.disconnect();
             controller.queued_names.lock().push_back((name, false));
         }
-    } else if let Some(bot) = controller.clients.read().get(&target.to_ascii_lowercase()).cloned() {
+    } else if let Some(bot) = controller
+        .clients
+        .read()
+        .get(&target.to_ascii_lowercase())
+        .cloned()
+    {
         bot.disconnect();
-        controller.queued_names.lock().push_back((target.to_owned(), false));
-    } else { println!("Use: rejoin all OR rejoin <name>"); }
+        controller
+            .queued_names
+            .lock()
+            .push_back((target.to_owned(), false));
+    } else {
+        println!("Use: rejoin all OR rejoin <name>");
+    }
 }
 
 fn steal_command(controller: &Controller, value: &str) {
@@ -714,8 +797,16 @@ fn steal_command(controller: &Controller, value: &str) {
                 if let Ok(tab) = bot.tab_list() {
                     for player in tab.values() {
                         let name = &player.profile.name;
-                        if valid_name(name) && controller.known_names.lock().insert(name.to_ascii_lowercase()) {
-                            controller.queued_names.lock().push_back((name.clone(), true));
+                        if valid_name(name)
+                            && controller
+                                .known_names
+                                .lock()
+                                .insert(name.to_ascii_lowercase())
+                        {
+                            controller
+                                .queued_names
+                                .lock()
+                                .push_back((name.clone(), true));
                             added += 1;
                         }
                     }
@@ -726,10 +817,19 @@ fn steal_command(controller: &Controller, value: &str) {
         "off" => println!("Steal scan is one-shot; no persistent mode is active."),
         "" => println!("Use: steal on/off OR steal <username>"),
         name if valid_name(name) => {
-            if controller.known_names.lock().insert(name.to_ascii_lowercase()) {
-                controller.queued_names.lock().push_back((value.to_owned(), true));
+            if controller
+                .known_names
+                .lock()
+                .insert(name.to_ascii_lowercase())
+            {
+                controller
+                    .queued_names
+                    .lock()
+                    .push_back((value.to_owned(), true));
                 println!("Queued stolen username: {value}");
-            } else { println!("Name is already known/queued."); }
+            } else {
+                println!("Name is already known/queued.");
+            }
         }
         _ => println!("Invalid Minecraft username."),
     }
@@ -737,14 +837,21 @@ fn steal_command(controller: &Controller, value: &str) {
 
 fn toggle(flag: &AtomicBool, value: &str, label: &str) {
     match value.to_ascii_lowercase().as_str() {
-        "on" => { flag.store(true, Ordering::Relaxed); println!("{label} ON"); }
-        "off" => { flag.store(false, Ordering::Relaxed); println!("{label} OFF"); }
+        "on" => {
+            flag.store(true, Ordering::Relaxed);
+            println!("{label} ON");
+        }
+        "off" => {
+            flag.store(false, Ordering::Relaxed);
+            println!("{label} OFF");
+        }
         _ => println!("Use: {} on/off", label.to_ascii_lowercase()),
     }
 }
 
 fn print_help() {
-    println!(r#"
+    println!(
+        r#"
 === BOT CONTROL ===
 all <message>                 Send chat as every online bot
 one <name> <message>          Send chat as one bot
@@ -768,7 +875,8 @@ resetplayer <name>            Clear local remembered-name state
 version                       Show native protocol version
 help                          Show this list
 quit                          Disconnect and exit
-"#);
+"#
+    );
 }
 
 #[cfg(test)]
