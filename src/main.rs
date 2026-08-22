@@ -207,7 +207,6 @@ async fn main() -> eyre::Result<AppExit> {
         }
     }
 
-
     let mut builder = SwarmBuilder::new()
         .set_handler(bot_handler)
         .set_swarm_handler(swarm_handler)
@@ -325,14 +324,17 @@ fn interactive_setup() -> Config {
 }
 
 fn ask_server() -> String {
-    ask_until("Server IP / hostname (include :port if needed): ", |value| {
-        let value = value.trim();
-        if value.is_empty() || value.chars().any(char::is_whitespace) {
-            None
-        } else {
-            Some(value.to_owned())
-        }
-    })
+    ask_until(
+        "Server IP / hostname (include :port if needed): ",
+        |value| {
+            let value = value.trim();
+            if value.is_empty() || value.chars().any(char::is_whitespace) {
+                None
+            } else {
+                Some(value.to_owned())
+            }
+        },
+    )
 }
 
 fn ask(prompt: &str) -> String {
