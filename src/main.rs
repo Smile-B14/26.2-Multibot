@@ -12,7 +12,7 @@ use std::{
 
 use azalea::{
     JoinOpts,
-    ecs::prelude::*,
+    ecs::prelude::{Component, Resource, With, Without},
     entity::{Dead, LocalEntity, Position, metadata::Player},
     pathfinder::{PathfinderOpts, goals::RadiusGoal},
     prelude::*,
@@ -21,7 +21,7 @@ use azalea::{
 use azalea_inventory::operations::ThrowClick;
 use azalea_protocol::connect::Proxy;
 use parking_lot::{Mutex, RwLock};
-use rand::{Rng, seq::IndexedRandom};
+use rand::{RngExt, seq::IndexedRandom};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     time::sleep,
@@ -36,6 +36,7 @@ struct Config {
     server: String,
     bot_names: Vec<String>,
     stay_minutes: u64,
+    infinite_initial: bool,
     join_gap: Duration,
     follow_radius: f64,
     follow_distance: f64,
@@ -89,6 +90,7 @@ impl Default for Controller {
             server: "localhost".into(),
             bot_names: vec![],
             stay_minutes: 0,
+            infinite_initial: false,
             join_gap: Duration::from_millis(6500),
             follow_radius: 40.0,
             follow_distance: 2.0,
@@ -117,7 +119,7 @@ impl Controller {
             auth_enabled: Arc::new(AtomicBool::new(true)),
             auth_password: Arc::new(RwLock::new(DEFAULT_AUTH_PASSWORD.into())),
             joining_enabled: Arc::new(AtomicBool::new(true)),
-            infinite_spawn: Arc::new(AtomicBool::new(false)),
+            infinite_spawn: Arc::new(AtomicBool::new(config.infinite_initial)),
             spam_generation: Arc::new(AtomicU64::new(0)),
             shutting_down: Arc::new(AtomicBool::new(false)),
             dead_bots: Arc::new(AtomicUsize::new(0)),
@@ -253,6 +255,7 @@ fn interactive_setup() -> Config {
         server,
         bot_names: names,
         stay_minutes,
+        infinite_initial: count == 0,
         join_gap: Duration::from_millis(6500),
         follow_radius: 40.0,
         follow_distance: 2.0,
@@ -361,6 +364,13 @@ async fn bot_handler(bot: Client, event: Event, state: BotState) -> eyre::Result
                 .clients
                 .write()
                 .remove(&state.name.to_ascii_lowercase());
+            if let Some(proxy) = &state.proxy {
+                controller.proxies.mark_dead(proxy);
+            }
+            controller.dead_bots.fetch_add(1, Ordering::Relaxed);
+            if controller.joining_enabled.load(Ordering::Relaxed) {
+                enqueue_unique(&controller, state.name.clone(), state.stolen);
+            }
             println!(
                 "\x1b[31m[{}] CONNECTION FAILED: {reason:?}\x1b[0m",
                 state.name
@@ -417,7 +427,7 @@ fn ai_tick(bot: &Client, controller: &Controller) -> eyre::Result<()> {
     let eye = bot.eye_position()?;
     let target = bot
         .nearest_entity_by::<&Position, (With<Player>, Without<LocalEntity>, Without<Dead>)>(
-            |position| eye.distance_to(**position) <= controller.config.follow_radius,
+            |position: &Position| eye.distance_to(*position) <= controller.config.follow_radius,
         )?;
 
     if let Some(target) = target {
@@ -431,7 +441,10 @@ fn ai_tick(bot: &Client, controller: &Controller) -> eyre::Result<()> {
         }
         if distance > controller.config.follow_distance + 0.75 && !bot.is_calculating_path() {
             bot.start_goto_with_opts(
-                RadiusGoal::new(target.position()?, controller.config.follow_distance),
+                RadiusGoal::new(
+                    target.position()?,
+                    controller.config.follow_distance as f32,
+                ),
                 PathfinderOpts::new()
                     .retry_on_no_path(false)
                     .max_timeout(Duration::from_secs(2)),
@@ -513,7 +526,7 @@ async fn swarm_handler(
             }
             controller.dead_bots.fetch_add(1, Ordering::Relaxed);
             if controller.joining_enabled.load(Ordering::Relaxed) {
-                controller.queued_names.lock().push_back((name, false));
+                enqueue_unique(&controller, name, false);
             }
         }
         SwarmEvent::Chat(message) => {
@@ -761,6 +774,16 @@ fn start_spam(controller: Controller, interval_ms: u64, message: String) {
     });
 }
 
+fn enqueue_unique(controller: &Controller, name: String, stolen: bool) {
+    let mut queue = controller.queued_names.lock();
+    if !queue
+        .iter()
+        .any(|(queued, _)| queued.eq_ignore_ascii_case(&name))
+    {
+        queue.push_back((name, stolen));
+    }
+}
+
 fn rejoin(controller: &Controller, target: &str) {
     if target.eq_ignore_ascii_case("all") {
         let clients: Vec<(String, Client)> = controller
@@ -769,9 +792,8 @@ fn rejoin(controller: &Controller, target: &str) {
             .iter()
             .map(|(n, b)| (n.clone(), b.clone()))
             .collect();
-        for (name, bot) in clients {
+        for (_name, bot) in clients {
             bot.disconnect();
-            controller.queued_names.lock().push_back((name, false));
         }
     } else if let Some(bot) = controller
         .clients
@@ -780,10 +802,6 @@ fn rejoin(controller: &Controller, target: &str) {
         .cloned()
     {
         bot.disconnect();
-        controller
-            .queued_names
-            .lock()
-            .push_back((target.to_owned(), false));
     } else {
         println!("Use: rejoin all OR rejoin <name>");
     }
