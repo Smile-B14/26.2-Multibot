@@ -2111,6 +2111,7 @@ dependencies = [
  "azalea-protocol",
  "bevy_ecs",
  "eyre",
+ "hickory-resolver",
  "parking_lot",
  "rand 0.10.2",
  "reqwest 0.12.28",

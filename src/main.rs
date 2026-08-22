@@ -175,7 +175,6 @@ impl ProxyPool {
 
 #[tokio::main]
 async fn main() -> eyre::Result<AppExit> {
-
     println!("\n\x1b[36m=== {BANNER} ===\x1b[0m");
     println!("\x1b[35mCredits: Smile B | Native Minecraft Java 26.2\x1b[0m\n");
 
@@ -220,8 +219,8 @@ async fn main() -> eyre::Result<AppExit> {
 }
 
 async fn resolve_server(raw: &str) -> eyre::Result<ResolvedAddr> {
-    let server = ServerAddr::try_from(raw)
-        .map_err(|_| eyre::eyre!("Invalid server address: {raw}"))?;
+    let server =
+        ServerAddr::try_from(raw).map_err(|_| eyre::eyre!("Invalid server address: {raw}"))?;
     let resolver = Resolver::builder_with_config(
         ResolverConfig::udp_and_tcp(&GOOGLE),
         TokioRuntimeProvider::new(),
