@@ -31,7 +31,7 @@ Native Minecraft Java **26.2** multi-bot controller built with [Azalea](https://
 ## Requirements
 
 - Windows/Linux/macOS: rustup (the repository pins `nightly-2026-07-22`, the Azalea-compatible toolchain)
-- Termux: its patched `rust` package; the documented build uses `RUSTC_BOOTSTRAP=1` because rustup is unsupported on Android
+- Termux: its patched `rust` package; the documented build sets `RUSTUP_TOOLCHAIN=nightly-termux` and `RUSTC_BOOTSTRAP=1` because rustup is unsupported on Android and Azalea checks for a nightly channel
 - Git
 - Approximately 3-6 GB free storage for the first Rust/Azalea build
 - A 64-bit Android device for Termux
@@ -47,7 +47,7 @@ pkg update -y && pkg upgrade -y
 pkg install -y git rust clang pkg-config openssl
 git clone https://github.com/Smile-B14/26.2-Multibot.git
 cd 26.2-Multibot
-RUSTC_BOOTSTRAP=1 cargo build --release
+RUSTUP_TOOLCHAIN=nightly-termux RUSTC_BOOTSTRAP=1 cargo build --release
 ./target/release/multibot-26-2
 ```
 
@@ -63,7 +63,7 @@ Update the project and rebuild:
 ```bash
 cd ~/26.2-Multibot
 git pull
-RUSTC_BOOTSTRAP=1 cargo build --release
+RUSTUP_TOOLCHAIN=nightly-termux RUSTC_BOOTSTRAP=1 cargo build --release
 ./target/release/multibot-26-2
 ```
 
@@ -274,7 +274,7 @@ cargo build --release
 Android likely ran out of memory. Close other applications and limit parallel compilation:
 
 ```bash
-RUSTC_BOOTSTRAP=1 CARGO_BUILD_JOBS=1 cargo build --release
+RUSTUP_TOOLCHAIN=nightly-termux RUSTC_BOOTSTRAP=1 CARGO_BUILD_JOBS=1 cargo build --release
 ```
 
 ### Linker or C compiler missing
