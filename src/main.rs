@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     io::{self, Write},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     str::FromStr,
     sync::{
         Arc,
@@ -19,7 +19,16 @@ use azalea::{
     swarm::prelude::*,
 };
 use azalea_inventory::operations::ThrowClick;
-use azalea_protocol::connect::Proxy;
+use azalea_protocol::{
+    address::{ResolvedAddr, ServerAddr},
+    connect::Proxy,
+};
+use hickory_resolver::{
+    Resolver,
+    config::{GOOGLE, ResolverConfig},
+    net::runtime::TokioRuntimeProvider,
+    proto::rr::RData,
+};
 use parking_lot::{Mutex, RwLock};
 use rand::{RngExt, seq::IndexedRandom};
 use tokio::{
@@ -165,12 +174,7 @@ impl ProxyPool {
 }
 
 #[tokio::main]
-async fn main() -> AppExit {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
-        )
-        .init();
+async fn main() -> eyre::Result<AppExit> {
 
     println!("\n\x1b[36m=== {BANNER} ===\x1b[0m");
     println!("\x1b[35mCredits: Smile B | Native Minecraft Java 26.2\x1b[0m\n");
@@ -191,6 +195,8 @@ async fn main() -> AppExit {
         }
     }
 
+    let resolved_server = resolve_server(&config.server).await?;
+
     let mut builder = SwarmBuilder::new()
         .set_handler(bot_handler)
         .set_swarm_handler(swarm_handler)
@@ -210,7 +216,50 @@ async fn main() -> AppExit {
         builder = builder.add_account_with_state_and_opts(Account::offline(name), state, opts);
     }
 
-    builder.start(config.server.clone()).await
+    Ok(builder.start(&resolved_server).await)
+}
+
+async fn resolve_server(raw: &str) -> eyre::Result<ResolvedAddr> {
+    let server = ServerAddr::try_from(raw)
+        .map_err(|_| eyre::eyre!("Invalid server address: {raw}"))?;
+    let resolver = Resolver::builder_with_config(
+        ResolverConfig::udp_and_tcp(&GOOGLE),
+        TokioRuntimeProvider::new(),
+    )
+    .build()?;
+
+    let mut target = server.clone();
+    if server.port == 25565 {
+        let query = format!("_minecraft._tcp.{}", server.host);
+        if let Ok(records) = resolver.srv_lookup(query).await {
+            if let Some(answer) = records.answers().first() {
+                if let RData::SRV(srv) = &answer.data {
+                    target.host = srv.target.to_ascii();
+                    target.port = srv.port;
+                }
+            }
+        }
+    }
+
+    let ip = if let Ok(ip) = target.host.parse::<IpAddr>() {
+        ip
+    } else {
+        resolver
+            .lookup_ip(target.host.as_str())
+            .await?
+            .iter()
+            .next()
+            .ok_or_else(|| eyre::eyre!("No A/AAAA record found for {}", target.host))?
+    };
+
+    println!(
+        "\x1b[36mResolved {} to {}:{}\x1b[0m",
+        server, ip, target.port
+    );
+    Ok(ResolvedAddr {
+        server,
+        socket: SocketAddr::new(ip, target.port),
+    })
 }
 
 fn interactive_setup() -> Config {
