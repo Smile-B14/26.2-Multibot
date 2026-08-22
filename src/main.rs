@@ -178,7 +178,20 @@ async fn main() -> eyre::Result<AppExit> {
     println!("\n\x1b[36m=== {BANNER} ===\x1b[0m");
     println!("\x1b[35mCredits: Smile B | Native Minecraft Java 26.2\x1b[0m\n");
 
-    let config = interactive_setup();
+    let mut config = interactive_setup();
+    let resolved_server = loop {
+        match resolve_server(&config.server).await {
+            Ok(resolved) => break resolved,
+            Err(error) => {
+                println!(
+                    "\x1b[31mCould not resolve '{}': {error}\x1b[0m",
+                    config.server
+                );
+                println!("Check the address and enter it again. Example: hh.aternos.me");
+                config.server = ask_server();
+            }
+        }
+    };
     let controller = Controller::new(config.clone());
 
     println!("\x1b[36mFetching public SOCKS5 proxies...\x1b[0m");
@@ -193,8 +206,6 @@ async fn main() -> eyre::Result<AppExit> {
             );
         }
     }
-
-    let resolved_server = resolve_server(&config.server).await?;
 
     let mut builder = SwarmBuilder::new()
         .set_handler(bot_handler)
@@ -242,12 +253,18 @@ async fn resolve_server(raw: &str) -> eyre::Result<ResolvedAddr> {
 
     let ip = if let Ok(ip) = target.host.parse::<IpAddr>() {
         ip
+    } else if let Some(ip) = resolver
+        .lookup_ip(target.host.as_str())
+        .await
+        .ok()
+        .and_then(|records| records.iter().next())
+    {
+        ip
     } else {
-        resolver
-            .lookup_ip(target.host.as_str())
+        tokio::net::lookup_host((target.host.trim_end_matches('.'), target.port))
             .await?
-            .iter()
             .next()
+            .map(|address| address.ip())
             .ok_or_else(|| eyre::eyre!("No A/AAAA record found for {}", target.host))?
     };
 
@@ -262,13 +279,7 @@ async fn resolve_server(raw: &str) -> eyre::Result<ResolvedAddr> {
 }
 
 fn interactive_setup() -> Config {
-    let server = ask_until("Server IP / hostname (include :port if needed): ", |v| {
-        if v.trim().is_empty() {
-            None
-        } else {
-            Some(v.trim().to_owned())
-        }
-    });
+    let server = ask_server();
 
     let names_text = ask("Bot names separated by commas (blank = generated): ");
     let mut names: Vec<String> = names_text
@@ -310,6 +321,20 @@ fn interactive_setup() -> Config {
         follow_distance: 2.0,
         hit_distance: 3.5,
     }
+}
+
+fn ask_server() -> String {
+    ask_until(
+        "Server IP / hostname (include :port if needed): ",
+        |value| {
+            let value = value.trim();
+            if value.is_empty() || value.chars().any(char::is_whitespace) {
+                None
+            } else {
+                Some(value.to_owned())
+            }
+        },
+    )
 }
 
 fn ask(prompt: &str) -> String {
