@@ -30,7 +30,8 @@ Native Minecraft Java **26.2** multi-bot controller built with [Azalea](https://
 
 ## Requirements
 
-- Rust stable toolchain with edition 2024 support
+- Windows/Linux/macOS: rustup (the repository pins `nightly-2026-07-22`, the Azalea-compatible toolchain)
+- Termux: its patched `rust` package; the documented build uses `RUSTC_BOOTSTRAP=1` because rustup is unsupported on Android
 - Git
 - Approximately 3-6 GB free storage for the first Rust/Azalea build
 - A 64-bit Android device for Termux
@@ -46,7 +47,7 @@ pkg update -y && pkg upgrade -y
 pkg install -y git rust clang pkg-config openssl
 git clone https://github.com/Smile-B14/26.2-Multibot.git
 cd 26.2-Multibot
-cargo build --release
+RUSTC_BOOTSTRAP=1 cargo build --release
 ./target/release/multibot-26-2
 ```
 
@@ -62,7 +63,7 @@ Update the project and rebuild:
 ```bash
 cd ~/26.2-Multibot
 git pull
-cargo build --release
+RUSTC_BOOTSTRAP=1 cargo build --release
 ./target/release/multibot-26-2
 ```
 
@@ -252,7 +253,7 @@ cargo test
 cargo build --release
 ```
 
-GitHub Actions runs the same checks on every push.
+GitHub Actions runs the same checks on every push and also compiles with the stable-plus-`RUSTC_BOOTSTRAP` path used by Termux.
 
 ## Updating for future Minecraft versions
 
@@ -264,7 +265,7 @@ cargo test
 cargo build --release
 ```
 
-No bot framework can support an unreleased protocol automatically.
+`Cargo.toml` deliberately pins the exact Azalea revision, so a future dependency update cannot silently break a working 26.2 build. No bot framework can support an unreleased protocol automatically; once Azalea implements a new protocol, update the pinned revisions and re-run CI.
 
 ## Troubleshooting
 
@@ -273,7 +274,7 @@ No bot framework can support an unreleased protocol automatically.
 Android likely ran out of memory. Close other applications and limit parallel compilation:
 
 ```bash
-CARGO_BUILD_JOBS=1 cargo build --release
+RUSTC_BOOTSTRAP=1 CARGO_BUILD_JOBS=1 cargo build --release
 ```
 
 ### Linker or C compiler missing
