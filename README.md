@@ -243,6 +243,21 @@ Public proxy limitations:
 
 This only works on offline-mode servers that allow duplicate/offline identity behavior. It cannot impersonate an authenticated Microsoft account on an online-mode server.
 
+## Runtime resilience
+
+Recoverable failures are handled without panicking:
+
+- Invalid or unresolvable server addresses ask for the address again.
+- Proxy downloads have a 20-second timeout, HTTP status validation and a 2 MiB response limit.
+- Failed proxy refreshes keep the current pool and retry after 60 seconds.
+- Dead proxies automatically become eligible again after 10 minutes.
+- Infinite spawning keeps only one generated bot waiting, preventing an unbounded queue.
+- Startup and `add` accept up to 10,000 bots per request to prevent accidental memory exhaustion.
+- AI errors on unloaded entities skip that tick instead of stopping the bot handler.
+- Closed or failed terminal input triggers a clean swarm shutdown.
+
+Android can still terminate Termux for low memory, battery management or a forced app close. Native dependency bugs and operating-system failures cannot be caught reliably by application-level error handling.
+
 ## Verification
 
 Run formatting, tests and a release build:
